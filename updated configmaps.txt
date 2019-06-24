@@ -1,0 +1,634 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: c7-sentinel
+data:
+  my-script.sh: |
+   `docker_live_image=c7-sentinel16
+   docker_live_version=1.0.0.0
+   privatehub=docker-hub-dev.blueally.com
+   hubuid=bachdocker
+   hubpwd=Li0nIa2020
+   sentinel_hostname=docker-brownbag
+   sentinel_name=docker-brownbag
+   sentinel_IP=
+   jwt_token=eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiIxMjM0NTYiLCJhdWQiOiJUZXN0Q3VzdG9tZXIiLCJpYXQiOjE1NTIzOTQ3MjUsImlzcyI6InNhZmVndWFyZC5ibHVlYWxseS5jb20iLCJleHAiOjE1NTI1Njc1MjV9.TArK55dODZ_eW5kmuxdVFDsaHWcSwg8ceaxLGvcFPIG9Buzs_43bIJ_NSHtZbhzyhmYXo193UsUDYqYlvjnd1g
+   registration_key=1WOhY9p7rFBO7YpXeeOjh5AqTDzlctph
+   security_key=123456
+   customer_name="Customer1"
+   gateway_url=https://bach-gw002.blueally.com:8080
+   rest_api_url=https://safeguard.blueally.com/sentry
+   rest_api_url_show=`echo "$rest_api_url" | awk -F/ '{ print $1$3 }'| sed 's#:#://#g' `
+   gateway_urls=https://bach-gw002.blueally.com:8080
+   gateway_url_show=`echo "$gateway_url" | awk -F: '{ print $1":"$2}'`
+
+   updateHostentry () {
+   docker exec -it $sentinel_name bash -c '/usr/bin/echo "49.249.253.256   bach-gw002.blueally.com bach-gw002" >> /etc/hosts'
+   docker exec -it $sentinel_name bash -c '/usr/bin/echo "182.72.201.256  bach-gw001.blueally.com bach-gw001" >> /etc/hosts'
+   docker exec -it $sentinel_name bash -c '/usr/bin/echo "10.4.1.256    sg-dev.blueally.com  sg-dev" >> /etc/hosts'
+   }
+   mapports="-p 85:22 -p 514:514 -p 514:514/udp -p 1514:1514 -p 1514:1514/udp -p 162:162 -p 2055:2055 -p 2055:2055/udp -p 6343:6343 -p 6343:6343/udp -p 6344:6344 -p 6344:6344/udp -p 6514:6514 -p 6514:6514/udp -p 45000:45000/udp  -p 30:25 -p 7473:7473"
+   # echo "Pull docker image from HUB"
+   # docker pull $privatehub/$docker_live_image:$docker_live_version
+
+   echo "Initializing Sentinel image....."
+
+   docker run -h $sentinel_hostname -d $mapports -v /data/$sentinel_name/nifi/config/dmidecode:/usr/sbin/dmidecode -v /data/$sentinel_name/nifi/logs:/opt/nifi/logs -v /data/$sentinel_name/nifi/flowfile_repository:/opt/nifi/flowfile_repository -v /data/$sentinel_name/nifi/database_repository:/opt/nifi/database_repository -v /data/$sentinel_name/nifi/content_repository:/opt/nifi/content_repository -v /data/$sentinel_name/nifi/provenance_repository:/opt/nifi/provenance_repository -v /data/$sentinel_name/VulnWhisperer/data:/opt/VulnWhisperer/data --name $sentinel_name -it --restart always $privatehub/$docker_live_image:$docker_live_version
+   #updated uuid in flow.xml and gzip the file
+
+   myuuid=$(dmidecode | grep UUID | awk -F": " '{print $2}')
+
+   ## echo "Proposed UUID $myuuid"
+   #echo ' echo "   UUID:  '${myuuid}'"' > /data/$sentinel_name/nifi/config/dmidecode
+
+   ## REST_END_POINT_URL
+   PORTAL_SCAN_URL=${rest_api_url}/api/v1/nifi/sentinel/$myuuid
+   # echo ${PORTAL_SCAN_URL}
+   PORTAL_SCAN_URL=${rest_api_url_show}
+
+   docker exec -it $sentinel_name bash -c 'mkdir /opt/VulnWhisperer/data/nessus; mkdir /opt/VulnWhisperer/data/openvas; mkdir /opt/VulnWhisperer/data/database; mkdir "/opt/VulnWhisperer/data/nessus/My Scans";'
+
+   docker exec -it $sentinel_name bash -c 'cd /opt/nifi/conf && /usr/bin/gunzip flow.xml.gz && sed -i "s#value=\"PORTAL_SCAN_URL\"#value=\"'${PORTAL_SCAN_URL}'\"#g" /opt/nifi/conf/flow.xml && /usr/bin/gzip flow.xml'
+   docker exec -it $sentinel_name bash -c 'cd /opt/nifi/conf && /usr/bin/gunzip flow.xml.gz && sed -i "s#value=\"MYSENTINELUUID\"#value=\"'${myuuid}'\"#g" /opt/nifi/conf/flow.xml && /usr/bin/gzip flow.xml'
+
+
+   docker exec -it $sentinel_name bash -c 'cd /opt/nifi/conf && /usr/bin/gunzip flow.xml.gz && sed -i "s#<value>ED4707F3-361D-9130-7B33-93853D25A132</value>#<value>"'$myuuid'"</value>#g" /opt/nifi/conf/flow.xml && /usr/bin/gzip flow.xml'
+
+   # Updating GatewayUrls
+   docker exec -it $sentinel_name bash -c 'cd /opt/nifi/conf && /usr/bin/gunzip flow.xml.gz && sed -i "s#<url>\$GATEWAY_URL\$</url>#<url>"'$gateway_url/nifi'"</url>#" /opt/nifi/conf/flow.xml && sed -i "s#<urls>\$GATEWAY_URLS\$</urls>#<urls>"'$gateway_urls'"</urls>#" /opt/nifi/conf/flow.xml && /usr/bin/gzip flow.xml'
+
+   #update sentienl name in nifi.properties
+   docker exec -it $sentinel_name sed -i 's#nifi.ui.banner.text=.*#nifi.ui.banner.text='$sentinel_name'#' /opt/nifi/conf/nifi.properties
+
+   # Function to update hostentry
+   updateHostentry
+
+   # Restart nifi
+   docker exec -it $sentinel_name bash -c 'cd /opt/nifi/bin && ./nifi.sh stop && sleep 10 && ./nifi.sh start' >/dev/null
+   #docker exec -it $sentinel_name bash -c 'cd /opt/nifi/bin && ./nifi.sh status &'
+
+
+
+   # Updating the sentinel process check
+   cp -f ${SCRIPTDIR}/sentineld /data/
+   chmod 755 /data/sentineld
+   # make cron entry
+   dt=`date +%d-%m-%Y_%H_%m_%S`
+   isCronentry=`crontab -l 2> /dev/null | grep -i sentineld |grep -v grep | wc -l`
+   if [ "${isCronentry}" == "0" ]; then
+        crontab -l > /var/log/cron_${dt}.bkp 2> /dev/null
+        crontab -l > /tmp/a.cron 2> /dev/null
+        echo "*/15 * * * * /bin/sh /data/sentineld check > /tmp/sentineld.check.out" >> /tmp/a.cron
+        crontab /tmp/a.cron 2> /dev/null
+        rm -f /tmp/a.cron
+   else
+        crontab -l > /var/log/cron_${dt}.bkp 2> /dev/null
+        crontab -l | grep -v sentineld > /tmp/a.cron 2> /dev/null
+        echo "*/15 * * * * /bin/sh /data/sentineld check > /tmp/sentineld.check.out" >> /tmp/a.cron
+        crontab /tmp/a.cron 2> /dev/null
+        rm -f /tmp/a.cron
+   fi
+
+
+   ## sentinel_IP=`hostname -i | awk '{print $1 }'`
+   ## sentinel_IP=`hostname -i 2> /dev/null | awk '{print $1 }'`
+        sentinel_IP=`ip a | grep -w "inet" | grep -v 127.0.0.1 | awk '{print $2}' | cut -d"/" -f1 | head -1`
+   if [ "$sentinel_IP"  == "" ] ; then
+        sentinel_IP=`hostname -iI 2> /dev/null | awk '{print $1 }'`
+   fi
+
+        dkr_sentinel_IP=`docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $sentinel_name`
+   if [ "$dkr_sentinel_IP"  == "" ] ; then
+        dkr_sentinel_IP=`docker inspect --format '{{ .NetworkSettings.IPAddress }}' $sentinel_name`
+   fi
+
+   SIEMDIR="/data"
+   if [ ! -d "$SIEMDIR" ]; then
+        mkdir /data 2> /dev/null
+        # echo "SENTINEL not exit $sentinel_name"
+   fi
+   echo "SENTINEL=$sentinel_name" > /data/.sentinel
+   echo "CUSTOMER=$customer_name" >> /data/.sentinel
+   echo "HOSTIP=$sentinel_IP" >> /data/.sentinel
+   echo "GATEWAYURLS=$gateway_urls" >> /data/.sentinel
+   echo "GATEWAYURL=$gateway_url" >> /data/.sentinel
+   echo "API_URL=$rest_api_url" >> /data/.sentinel
+   echo "DOCKERHUB=$privatehub" >> /data/.sentinel`
+
+
+
+
+
+
+
+
+
+
+
+====================================================================================================================
+
+
+
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: c7-sentinel
+spec:
+  selector:
+    matchLabels:
+      service: sentinel
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+spec:
+  selector:
+    matchLabels:
+      service: sentinel
+      minReadySeconds: 0-
+spec:
+  template:
+    metadata:
+      labels:
+        name: sentinel
+    spec:
+      hostNetwork: true
+      containers:
+      - name: sentinel
+        image: docker-hub-dev.blueally.com/c7-sentinel12:1.0.0.0              
+        imagePullPolicy: Always
+      imagePullSecrets:
+      - name: my-secret
+        ports:
+        - containerPort: 7473
+          hostPort: 7473
+        volumeMounts:
+        - name: script-config
+          mountPath: /opt/my-container/config                
+      volumes:
+        - name: script-config
+          configMap:
+            name: c7-sentinel
+            defaultMode: 0744        
+  selector:
+    matchLabels:
+      name: sentinel
+
+
+
+
+Rolling updates
+
+kubectl set image daemonset c7-sentinel *=docker-hub-dev.blueally.com/c7-sentinel13:1.0.0.0
+
+kubectl rollout status ds/c7-sentinel
+
+
+kubectl delete ds c7-sentinel
+
+==============================================================================================
+
+deployment using configmap
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: c7-sentinel
+  labels:
+    name: sentinel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: sentinel
+  template:
+    metadata:
+      labels:
+        name: sentinel
+    spec:
+      containers:
+        - name: sentinel
+          image: docker-hub-dev.blueally.com/c7-sentinel12:1.0.0.0
+          ports:
+            - containerPort: 80
+          envFrom:
+          - configMapRef:
+              name: c7-sentinel
+          - secretRef:
+              name: my-secret
+
+
+=====================================================================================================
+with volume mount enabled
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: c7-sentinel
+spec:
+  selector:
+    matchLabels:
+      service: sentinel
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+spec:
+  selector:
+    matchLabels:
+      service: sentinel
+      minReadySeconds: 0-
+spec:
+  template:
+    metadata:
+      labels:
+        name: sentinel
+    spec:
+        hostNetwork: true
+        containers:
+        - name: sentinel
+          image: docker-hub-dev.blueally.com/c7-sentinel12:1.0.0.0
+          imagePullPolicy: Always
+          ports:
+          - containerPort: 7473
+            hostPort: 7473
+          volumeMounts:
+          - name: script-config
+            mountPath: /opt/my-container/config
+        imagePullSecrets:
+        - name: my-secret
+        volumes:
+        - name: script-config
+          configMap:
+            name: c7-sentinel
+            defaultMode: 0744        
+  selector:
+    matchLabels:
+      name: sentinel
+
+==============================================================================================================
+
+init containers usage:
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: c7-sentinel
+spec:
+  selector:
+    matchLabels:
+      service: sentinel
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+spec:
+  selector:
+    matchLabels:
+      service: sentinel
+      minReadySeconds: 0-
+spec:
+  template:
+    metadata:
+      labels:
+        name: sentinel
+    spec:
+        hostNetwork: true
+        containers:
+        - name: sentinel
+          image: docker-hub-dev.blueally.com/c7-sentinel12:1.0.0.0
+          command: ["sh", "-c", "c32fd19e-8553-469c-b375-3660389e2cd2/root/data/config.sh"]
+          imagePullPolicy: Always
+          ports:
+          - containerPort: 7473
+            hostPort: 7473
+          volumeMounts:
+          - name: script-config
+            mountPath: /opt/my-container/config
+        imagePullSecrets:
+        - name: my-secret
+        volumes:
+        - name: script-config
+          configMap:
+            name: c7-sentinel
+            defaultMode: 0744        
+  selector:
+    matchLabels:
+      name: sentinel
+
+========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: c7-sentinel
+  labels:
+    name: sentinel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: sentinel
+  template:
+    metadata:
+      labels:
+        name: sentinel
+    spec:
+      containers:
+        - name: sentinel
+          image: docker-hub-dev.blueally.com/c7-sentinel12:1.0.0.0
+          command: ["/bin/sh", "-c", "/opt/nifi/bin/nifi.sh start & -> /opt/my-container/config/my-script.sh"]         
+          ports:
+            - containerPort: 80
+          envFrom:
+          - configMapRef:
+              name: c7-sentinel
+          - secretRef:
+              name: my-secret
+
+
+
+You don't need to include the script in the image. Just execute the script in the docker-entrypoint.sh.
+ Once the docker-entrypoint is running the script will already place there by the configuration.
+ Just add the line /bin/bash /path/to/script to the docker-entrypoint.sh.
+ You might need to chmod the script first. 
+
+
+
+
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: c7-sentinel
+spec:
+  selector:
+    matchLabels:
+      service: sentinel
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+spec:
+  selector:
+    matchLabels:
+      service: sentinel
+      minReadySeconds: 0-
+spec:
+  template:
+    metadata:
+      labels:
+        name: sentinel
+    spec:
+        hostNetwork: true
+        containers:
+        - name: sentinel
+          image: docker-hub-dev.blueally.com/c7-sentinel12:1.0.0.0
+          imagePullPolicy: Always
+          ports:
+          - containerPort: 7473
+            hostPort: 7473
+          volumeMounts:
+          - name: script-config
+            mountPath: /opt/nifi/bin/config
+        imagePullSecrets:
+        - name: my-secret
+        volumes:
+        - name: script-config
+          configMap:
+            name: c7-sentinel
+            defaultMode: 0744        
+  selector:
+    matchLabels:
+      name: sentinel
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: c7-sentinel
+spec:
+  selector:
+    matchLabels:
+      service: sentinel
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+spec:
+  selector:
+    matchLabels:
+      service: sentinel
+      minReadySeconds: 0-
+spec:
+  template:
+    metadata:
+      labels:
+        name: sentinel
+    spec:
+        hostNetwork: true
+        containers:
+        - name: sentinel
+          image: docker-hub-dev.blueally.com/c7-sentinel12:1.0.0.0
+          command: ["/bin/sh"]
+          args: ["-c", "/opt/nifi/bin/config/..data/my-script.sh"]
+          imagePullPolicy: Always
+          ports:
+          - containerPort: 7473
+            hostPort: 7473
+          volumeMounts:
+          - name: script-config
+            mountPath: /opt/nifi/bin/config
+        imagePullSecrets:
+        - name: my-secret
+        volumes:
+        - name: script-config
+          configMap:
+            name: c7-sentinel
+            defaultMode: 0744        
+  selector:
+    matchLabels:
+      name: sentinel
+
+
+
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: c7-sentinel
+spec:
+  selector:
+    matchLabels:
+      service: sentinel
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+spec:
+  selector:
+    matchLabels:
+      service: sentinel
+      minReadySeconds: 0-
+spec:
+  template:
+    metadata:
+      labels:
+        name: sentinel
+    spec:
+        hostNetwork: true
+        containers:
+        - name: sentinel
+          image: docker-hub-dev.blueally.com/c7-sentinel12:1.0.0.0
+          command: ["/bin/bash"]
+          args: ["-c" , ""]
+          imagePullPolicy: Always
+          ports:
+          - containerPort: 7473
+            hostPort: 7473
+          volumeMounts:
+          - name: script-config
+            mountPath: /opt/nifi/bin/config
+        imagePullSecrets:
+        - name: my-secret
+        volumes:
+        - name: script-config                   
+          configMap:
+            name: c7-sentinel
+            defaultMode: 0744        
+  selector:
+    matchLabels:
+      name: sentinel
+
+66e51330-86d8-11e9-a75b-080027a6e632    machineID": "c32fd19e8553469cb3753660389e2cd2"
+
+
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dapi-test-pod
+spec:
+  containers:
+    - name: test-container
+      image: docker-hub-dev.blueally.com/c7-sentinel12:1.0.0.0      
+      envFrom:
+          - configMapRef:
+              name: c7-sentinel
+          - secretRef:
+              name: my-secret
+
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dapi-test-pod
+spec:
+  containers:
+    - name: test-container
+      image: docker-hub-dev.blueally.com/c7-sentinel12:1.0.0.0
+      command: ["/bin/sh", "-c"]
+      args: ["/opt/nifi/bin/config/my-script.sh"]
+      volumeMounts:
+          - name: script-config
+            mountPath: /opt/nifi/bin/config
+  volumes:
+  - name: script-config
+          valueFrom:
+          - configMapRef:
+              name: c7-sentinel
+          - secretRef:
+              name: my-secret
+
+
+
+
+
+
+=======================================================================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-deploy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+        - name: my-redis
+          image: docker-hub-dev.blueally.com/c7-sentinel12:1.0.0.0
+          command: ["/opt/nifi/bin/config/..data/my-script.sh"]
+          args: ["/opt/nifi/bin/nifi.sh start &"]          
+          volumeMounts:
+          - name: my-config # Must be the same as the volume name bellow
+            mountPath: /opt/nifi/bin/config
+      volumes:
+      - name: my-config
+        configMap:
+          name: my-script-config # The name of the ConfigMap
+          defaultMode: 0777      # We need execution mode for the file
+      - secretRef:
+        name: my-secret 
+
+
+
+
+
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-deploy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+        - name: my-redis
+          image: docker-hub-dev.blueally.com/c7-sentinel12:1.0.0.0
+          command: ["/bin/sh", "-c", "/var/lib/kubelet/pods/0f0c1d4e-966b-11e9-b1f9-080027a6e632/volumes/kubernetes.io~configmap/my-config/my-script.sh"]          
+          volumeMounts:
+          - name: my-config # Must be the same as the volume name bellow
+            mountPath: /opt/nifi/bin/config
+      volumes:
+      - name: my-config
+        configMap:
+          name: my-script-config # The name of the ConfigMap
+          defaultMode: 0777      # We need execution mode for the file
+      - secretRef:
+        name: my-secret 
+
+
+
+
+
+
+
+
