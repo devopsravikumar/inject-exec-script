@@ -1,0 +1,27 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: my-deploy
+  labels:
+    role: blog
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        role: blog
+    spec:
+      containers:
+      - name: my-redis
+        image: docker-hub-dev.blueally.com/c7-sentinel12:1.0.0.0
+        command: ["/config/script.sh"]      
+        volumeMounts:
+        - name: my-config
+          mountPath: /opt/nifi/bin/config
+      volumes:
+      - name: my-config
+        configMap:
+          name: wrapper
+          defaultMode: 0744
+      - secretRef:
+        name: my-secret
