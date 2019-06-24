@@ -21,7 +21,7 @@ spec:
       volumes:
       - name: my-config
         configMap:
-          name: wrapper
+          name: my-config
           defaultMode: 0744
       - secretRef:
         name: my-secret
